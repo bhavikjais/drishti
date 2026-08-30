@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Runtime / generated data (job outputs, uploads, per-job artifacts)
+jobs/
+outputs/
+uploads/
+references/
+zones/
+
+# Model weights (fetch separately, not source)
+models/
+
+# Editor / OS
+.claude/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local

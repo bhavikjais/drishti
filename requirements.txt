@@ -1,0 +1,40 @@
+# CPU-only PyTorch build. If a CUDA GPU is available on the target machine,
+# swap this index url / package version for a matching cu12x wheel and set
+# BORDERWATCH_DEVICE=cuda (see backend/config.py for auto-detection).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1+cpu
+torchvision==0.18.1+cpu
+
+numpy==1.26.4
+opencv-python==4.10.0.84
+ultralytics==8.3.130
+lap==0.5.12
+
+fastapi
+uvicorn[standard]
+python-multipart
+pyyaml
+
+# ANPR OCR fallback. Thin wrapper around the SYSTEM tesseract binary (not a pip
+# package) - install separately:
+#   Windows: winget install --id UB-Mannheim.TesseractOCR -e
+#   Debian/Ubuntu: sudo apt install tesseract-ocr
+#   macOS: brew install tesseract
+# Without the system binary, ANPR falls back further (OCR text stays empty).
+pytesseract
+
+# ANPR primary detector/OCR: a real trained plate detector (open-image-models,
+# ONNX YOLO) and a plate-specialized OCR model (fast-plate-ocr, ONNX CCT) --
+# both from the same author's fast-alpr project. Installed with --no-deps and
+# these three explicit extras only, deliberately skipping opencv-python-headless
+# (would shadow the pinned opencv-python==4.10.0.84 above) and letting numpy
+# stay pinned. Models download once from GitHub releases on first use, then run
+# fully offline. Falls back to Tesseract automatically if unavailable.
+#   pip install --no-deps "fast-plate-ocr[onnx]" "open-image-models[onnx]" onnxruntime rich
+fast-plate-ocr==1.1.0
+open-image-models==0.6.0
+onnxruntime==1.29.0
+rich==15.0.0
+
+pytest
+httpx
