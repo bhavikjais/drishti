@@ -29,7 +29,7 @@ export function SystemStatusPage() {
 
   return (
     <>
-      <PageHeader title="System Status" subtitle="BorderWatch backend health" />
+      <PageHeader title="System Status" subtitle="Drishti backend health" />
       <PageBody narrow>
         {status === "loading" && <LoadingBlock label="Checking system status…" />}
         {status === "error" && <ErrorState message={error} onRetry={refetch} />}

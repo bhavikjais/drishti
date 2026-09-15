@@ -30,7 +30,7 @@ export function Dashboard() {
   return (
     <>
       <PageHeader
-        title="BorderWatch"
+        title="Drishti"
         subtitle="AI Video Intelligence Command Center"
         actions={
           <button
@@ -55,7 +55,7 @@ export function Dashboard() {
             <EmptyState
               icon={Video}
               title="No analyses yet"
-              description="Upload surveillance footage to begin an analysis. BorderWatch will detect targets, plates, zone intrusions and behavioral alerts."
+              description="Upload surveillance footage to begin an analysis. Drishti will detect targets, plates, zone intrusions and behavioral alerts."
               action={
                 <button onClick={() => navigate("/analysis")} className="rounded bg-accent-blue px-5 py-2.5 text-[12.5px] font-bold text-[#051020] hover:bg-[#59aeff]">
                   START NEW ANALYSIS

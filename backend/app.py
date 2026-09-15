@@ -1,4 +1,4 @@
-"""BorderWatch API - thin HTTP layer over the module pipelines.
+"""Drishti API - thin HTTP layer over the module pipelines.
 
 Two job creation paths:
   - POST /api/zone-jobs: the original Phase 3 zone-only job (kept exactly
@@ -21,12 +21,13 @@ from pathlib import Path
 
 import cv2
 from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from backend.api.jobs import job_manager
 from backend.api.schemas import (
-    AnprModuleRequest, BehaviorModuleRequest, CombinedJobRequest, EvidenceItemOut,
-    JobStatusOut, LowlightModuleRequest, PersonIdModuleRequest, PlateSearchRequest,
+    AlertModuleRequest, AnprModuleRequest, BehaviorModuleRequest, CombinedJobRequest, DehazeModuleRequest,
+    EvidenceItemOut, JobStatusOut, LowlightModuleRequest, PersonIdModuleRequest, PlateSearchRequest,
     ReferenceUploadOut, SystemStatusOut, VideoInfoOut, VideoUploadOut, ZoneCreateRequest,
     ZoneJobRequest, ZoneOut, ZoneUpdateRequest,
 )
@@ -35,8 +36,8 @@ from backend.api.storage import (
     save_reference_photos, save_uploaded_video, save_zone,
 )
 from backend.config import (
-    AnprConfig, BehaviorConfig, EVIDENCE_DIR, LowLightConfig, OUTPUTS_DIR, PersonIDConfig,
-    SFACE_MODEL_PATH, YUNET_MODEL_PATH, YOLO_MODEL_PATH, ZoneConfig, detect_device,
+    AlertConfig, AnprConfig, BehaviorConfig, DehazeConfig, EVIDENCE_DIR, LowLightConfig, OUTPUTS_DIR,
+    PersonIDConfig, SFACE_MODEL_PATH, YUNET_MODEL_PATH, YOLO_MODEL_PATH, ZoneConfig, detect_device,
 )
 from backend.core.video import VideoReader, extract_frame
 from backend.modules.anpr.ocr import PlateOcr
@@ -45,7 +46,21 @@ from backend.modules.zone.pipeline import ZonePipeline
 from backend.orchestrator import CombinedPipeline, OrchestratorError, OrchestratorRequest
 
 logger = logging.getLogger("backend.app")
-app = FastAPI(title="BorderWatch API")
+app = FastAPI(title="Drishti API")
+
+# The main frontend (frontend/) talks to this API through Vite's dev proxy,
+# so it never needed CORS. notifications-app/ is a genuinely separate app on
+# its own origin/port with no such proxy, so it hits this API directly -
+# local dev origins only, not a wildcard, since this is a security tool.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173", "http://127.0.0.1:5173",  # main dashboard (frontend/)
+        "http://localhost:5175", "http://127.0.0.1:5175",  # notifications-app/ (5174 was taken by an unrelated process during dev)
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(NotFoundError)
@@ -181,7 +196,7 @@ def start_zone_job(req: ZoneJobRequest):
 @app.post("/api/jobs", response_model=JobStatusOut)
 def start_combined_job(req: CombinedJobRequest):
     video_path = find_video_path(req.video_id)
-    if not (req.person_id or req.anpr or req.zone_ids or req.behavior or req.lowlight):
+    if not (req.person_id or req.anpr or req.zone_ids or req.behavior or req.lowlight or req.dehaze):
         raise HTTPException(400, "at least one module must be enabled")
 
     orch_req = OrchestratorRequest()
@@ -211,12 +226,21 @@ def start_combined_job(req: CombinedJobRequest):
         if req.lowlight.config:
             orch_req.lowlight_config = dataclasses.replace(LowLightConfig(), **req.lowlight.config)
 
+    if req.dehaze is not None:
+        orch_req.enable_dehaze = True
+        if req.dehaze.config:
+            orch_req.dehaze_config = dataclasses.replace(DehazeConfig(), **req.dehaze.config)
+
+    if req.alert is not None:
+        orch_req.alert_config = AlertConfig(enabled=True, webhook_url=req.alert.webhook_url)
+
     with VideoReader(video_path) as reader:
         total_frames = reader.info.frame_count
     job = job_manager.create(kind="combined", total_frames=total_frames)
     output_path = OUTPUTS_DIR / f"job_{job.job_id}.mp4"
     evidence_dir = EVIDENCE_DIR / job.job_id
     orch_req.evidence_dir = evidence_dir
+    orch_req.job_id = job.job_id
     job.output_path = str(output_path)
     job.evidence_dir = str(evidence_dir)
 
@@ -232,7 +256,7 @@ def start_combined_job(req: CombinedJobRequest):
                 "duration_sec": result.video_info.duration_sec,
             },
             "person_id": result.person_id, "anpr": result.anpr, "zones": result.zones,
-            "behavior": result.behavior, "lowlight": result.lowlight,
+            "behavior": result.behavior, "lowlight": result.lowlight, "dehaze": result.dehaze,
         }
 
     job_manager.start(job, _run)

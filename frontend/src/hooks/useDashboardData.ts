@@ -99,7 +99,7 @@ export function useDashboardData(): DashboardData & { refetch: () => void } {
         setState({ jobs, metrics, activeJob, recentEvents });
         setError(null);
       } catch {
-        if (!cancelled) setError("Failed to reach BorderWatch API");
+        if (!cancelled) setError("Failed to reach Drishti API");
       } finally {
         if (!cancelled) setLoading(false);
       }

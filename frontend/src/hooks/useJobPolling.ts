@@ -31,7 +31,7 @@ export function useJobPolling(jobId: string | undefined, intervalMs = 1500) {
         }
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : "Failed to reach BorderWatch API");
+        setError(err instanceof ApiError ? err.message : "Failed to reach Drishti API");
         timerRef.current = window.setTimeout(tick, intervalMs * 2);
       }
     };

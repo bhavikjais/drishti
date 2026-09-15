@@ -14,12 +14,15 @@ existing, already-tested logic (TargetLock, PlateAggregator, ZoneMonitor,
 BehaviorMonitor, core.lowlight) from that single pass - no detection logic
 is reimplemented here, only composed.
 
-Two integration-only event types are synthesized here (not inside any
+Three integration-only event types are synthesized here (not inside any
 module, since neither zone/state.py nor person_id/anpr know about each
-other): TARGET_ZONE_INTRUSION (the locked target track entered a zone) and
-a one-shot LOW_LIGHT notification (the run contained dark footage).
-TARGET_BEHAVIOR_ALERT already exists inside behavior/state.py and is reused
-as-is by passing it the real target_track_id/zone_states from this run.
+other): TARGET_ZONE_INTRUSION (the locked target track entered a zone),
+TARGET_ZONE_INTRUSION_PREDICTED (the locked target's own trajectory is
+forecast to enter a zone soon - zone/forecast.py's intent-forecasting
+correlated against the target lock), and a one-shot LOW_LIGHT notification
+(the run contained dark footage). TARGET_BEHAVIOR_ALERT already exists
+inside behavior/state.py and is reused as-is by passing it the real
+target_track_id/zone_states from this run.
 """
 from __future__ import annotations
 
@@ -31,13 +34,15 @@ from typing import Callable
 import cv2
 
 from backend.config import (
-    AnprConfig, BehaviorConfig, LowLightConfig, OSNET_MODEL_PATH, PersonIDConfig, TrackerConfig,
-    YUNET_MODEL_PATH, SFACE_MODEL_PATH, ZoneConfig,
+    AlertConfig, AnprConfig, BehaviorConfig, DehazeConfig, LowLightConfig, OSNET_MODEL_PATH, PersonIDConfig,
+    TrackerConfig, YUNET_MODEL_PATH, SFACE_MODEL_PATH, ZoneConfig,
 )
+from backend.core.alerts import dispatch_alert
+from backend.core.dehaze import process_frame as dehaze_process_frame
 from backend.core.lowlight import process_frame as lowlight_process_frame
 from backend.core.output import (
-    CYAN, MAGENTA, ORANGE, OutputVideoWriter, draw_banner, draw_polygon,
-    draw_target_box, format_timestamp,
+    CYAN, MAGENTA, ORANGE, YELLOW, OutputVideoWriter, draw_banner, draw_polygon,
+    draw_predicted_path, draw_target_box, format_timestamp,
 )
 from backend.core.target_lock import TargetLock
 from backend.core.tracker import ObjectTracker
@@ -53,6 +58,7 @@ from backend.modules.person_id.person_reid import PersonReID
 from backend.modules.person_id.pipeline import _bbox_min_side, _prediction_still_looks_like_target
 from backend.modules.person_id.recognizer import FaceRecognizer, ReferenceSet
 from backend.modules.person_id.target_gallery import TargetGallery
+from backend.modules.zone.forecast import ZoneForecaster
 from backend.modules.zone.geometry import Zone, centroid, denormalize_polygon, footpoint
 from backend.modules.zone.state import INSIDE, ZoneMonitor
 
@@ -128,8 +134,14 @@ class OrchestratorRequest:
     enable_lowlight: bool = False
     lowlight_config: LowLightConfig | None = None
 
+    enable_dehaze: bool = False
+    dehaze_config: DehazeConfig | None = None
+
+    alert_config: AlertConfig | None = None
+
     tracker_config: TrackerConfig | None = None
     evidence_dir: Path | None = None
+    job_id: str | None = None  # only used to tag dispatch_alert() webhook payloads
 
 
 @dataclass
@@ -146,6 +158,7 @@ class OrchestratorResult:
     zones: list[dict] | None = None
     behavior: dict | None = None
     lowlight: dict | None = None
+    dehaze: dict | None = None
     evidence_dir: Path | None = None
 
 
@@ -163,6 +176,8 @@ class CombinedPipeline:
         self.zone_cfg = request.zone_config or ZoneConfig()
         self.behavior_cfg = request.behavior_config or BehaviorConfig()
         self.lowlight_cfg = request.lowlight_config or LowLightConfig()
+        self.dehaze_cfg = request.dehaze_config or DehazeConfig()
+        self.alert_cfg = request.alert_config or AlertConfig()
 
         self.face_detector = self.face_recognizer = self.person_reid = None
         if request.enable_person_id:
@@ -204,6 +219,8 @@ class CombinedPipeline:
             modules_run.append("behavior")
         if req.enable_lowlight:
             modules_run.append("lowlight")
+        if req.enable_dehaze:
+            modules_run.append("dehaze")
         if not modules_run:
             raise OrchestratorError("at least one module must be enabled")
 
@@ -251,6 +268,13 @@ class CombinedPipeline:
 
         # --- zone state (multiple zones supported) ---
         zone_monitors = [ZoneMonitor(z.zone_id, self.zone_cfg.entry_grace_frames, self.zone_cfg.exit_grace_frames, self.zone_cfg.track_absence_grace_frames, self.zone_cfg.dwell_threshold_sec) for z in req.zones]
+        zone_forecasters: list[ZoneForecaster | None] = [
+            ZoneForecaster(
+                z.zone_id, horizon_sec=self.zone_cfg.predict_horizon_sec, history_frames=self.zone_cfg.predict_history_frames,
+                min_speed_px_per_sec=self.zone_cfg.predict_min_speed_px_per_sec, rewarn_cooldown_sec=self.zone_cfg.predict_rewarn_cooldown_sec,
+            ) if self.zone_cfg.predict_enabled else None
+            for z in req.zones
+        ]
         zone_polygons_px: list[list[tuple[int, int]]] = []
 
         # --- behavior state ---
@@ -267,6 +291,9 @@ class CombinedPipeline:
         low_light_notified = False
         low_light_frame_count = 0
         enhanced_frame_count = 0
+        haze_notified = False
+        haze_frame_count = 0
+        dehazed_frame_count = 0
         person_face_inference_count = 0
         person_reid_inference_count = 0
         person_predicted_frame_count = 0
@@ -316,12 +343,25 @@ class CombinedPipeline:
                     detection_stride=self.tracker_config.detection_stride,
                     confidence=self.tracker_config.confidence,
                     track_buffer=self.person_id_cfg.gap_tolerance_frames,
-                    frame_rate=max(1, round(reader.info.fps)) if reader.info.fps else 30,
                     device=self.tracker_config.device,
                 )
 
             try:
                 for frame in reader:
+                    if req.enable_dehaze:
+                        frame.image, dz_info = dehaze_process_frame(frame.image, self.dehaze_cfg)
+                        if dz_info.classification == "HAZY":
+                            haze_frame_count += 1
+                            if not haze_notified:
+                                haze_notified = True
+                                all_events.append({
+                                    "event_id": next_event_id(), "type": "HAZE_DETECTED", "track_id": None,
+                                    "frame_index": frame.index, "timestamp_sec": frame.timestamp_sec,
+                                    "data": {"note": "haze/mist detected in this video"},
+                                })
+                        if dz_info.enhanced:
+                            dehazed_frame_count += 1
+
                     if req.enable_lowlight:
                         frame.image, ll_info = lowlight_process_frame(frame.image, self.lowlight_cfg)
                         if ll_info.classification == "LOW_LIGHT":
@@ -486,7 +526,7 @@ class CombinedPipeline:
                     zone_inside_any: dict[int, str] = {}
                     if req.zones:
                         footpoints = {tid: footpoint(t.bbox) for tid, t in tracks_by_id.items()}
-                        for zone, monitor, polygon_px in zip(req.zones, zone_monitors, zone_polygons_px):
+                        for zone, monitor, polygon_px, forecaster in zip(req.zones, zone_monitors, zone_polygons_px, zone_forecasters):
                             n_before = len(monitor.events)
                             monitor.update(footpoints, frame.index, frame.timestamp_sec, polygon_px)
                             new_events = monitor.events[n_before:]
@@ -510,6 +550,34 @@ class CombinedPipeline:
                             for tid in tracks_by_id:
                                 if monitor.state_of(tid) == INSIDE:
                                     zone_inside_any[tid] = INSIDE
+
+                            if forecaster is not None:
+                                currently_inside = {tid for tid in footpoints if monitor.state_of(tid) == INSIDE}
+                                n_before_fc = len(forecaster.events)
+                                forecaster.update(footpoints, currently_inside, frame.index, frame.timestamp_sec, polygon_px)
+                                for ev in forecaster.events[n_before_fc:]:
+                                    cname = "VEHICLE" if track_class.get(ev.track_id) in self.tracker_config.vehicle_class_ids else "PERSON"
+                                    ev_bbox = tracks_by_id[ev.track_id].bbox if ev.track_id in tracks_by_id else None
+                                    all_events.append({
+                                        "event_id": next_event_id(), "type": ev.type, "track_id": ev.track_id,
+                                        "frame_index": ev.frame_index, "timestamp_sec": ev.timestamp_sec, "zone": zone.zone_id,
+                                        "data": ev.data, "evidence_path": save_evidence(frame.image, ev.track_id, ev.type, frame.index, ev_bbox),
+                                    })
+                                    active_banners.append((
+                                        ["CROSSING PREDICTED", f"{cname} #{ev.track_id}", f"ETA {ev.data['eta_sec']:.1f}s"],
+                                        YELLOW, frame.index + banner_frames,
+                                    ))
+                                    if ev.track_id in footpoints:
+                                        draw_predicted_path(frame.image, footpoints[ev.track_id], tuple(ev.data["predicted_point"]))
+                                    if target_tid_shared is not None and ev.track_id == target_tid_shared:
+                                        last = target_zone_intrusion_last.get(ev.track_id, -1e9)
+                                        if ev.timestamp_sec - last >= self.behavior_cfg.behavior_cooldown_seconds:
+                                            target_zone_intrusion_last[ev.track_id] = ev.timestamp_sec
+                                            all_events.append({
+                                                "event_id": next_event_id(), "type": "TARGET_ZONE_INTRUSION_PREDICTED", "track_id": ev.track_id,
+                                                "frame_index": ev.frame_index, "timestamp_sec": ev.timestamp_sec, "zone": zone.zone_id,
+                                                "data": {"eta_sec": ev.data["eta_sec"]}, "evidence_path": save_evidence(frame.image, ev.track_id, "TARGET_ZONE_INTRUSION_PREDICTED", frame.index, ev_bbox),
+                                            })
 
                     # ---------------- behavior ----------------
                     if req.enable_behavior:
@@ -599,6 +667,10 @@ class CombinedPipeline:
                 all_events.append({"event_id": next_event_id(), "type": e.type, "track_id": e.track_id, "frame_index": e.frame_index, "timestamp_sec": e.timestamp_sec, "data": e.data})
         all_events.sort(key=lambda d: d["frame_index"])
 
+        if self.alert_cfg.enabled and self.alert_cfg.webhook_url:
+            for ev in all_events:
+                dispatch_alert(self.alert_cfg, req.job_id or "unknown", ev)
+
         person_id_summary = None
         if req.enable_person_id:
             person_id_summary = {
@@ -636,11 +708,12 @@ class CombinedPipeline:
         zones_summary = None
         if req.zones:
             zones_summary = []
-            for zone, monitor in zip(req.zones, zone_monitors):
+            for zone, monitor, forecaster in zip(req.zones, zone_monitors, zone_forecasters):
                 entries = sum(1 for e in monitor.events if e.type == "ZONE_ENTRY")
                 exits = sum(1 for e in monitor.events if e.type == "ZONE_EXIT")
                 dwells = sum(1 for e in monitor.events if e.type == "LONG_DWELL")
-                zones_summary.append({"zone_id": zone.zone_id, "label": zone.label, "entries": entries, "exits": exits, "dwell_events": dwells})
+                predicted = len(forecaster.events) if forecaster is not None else 0
+                zones_summary.append({"zone_id": zone.zone_id, "label": zone.label, "entries": entries, "exits": exits, "dwell_events": dwells, "predicted_crossings": predicted})
 
         behavior_summary = None
         if req.enable_behavior:
@@ -658,9 +731,18 @@ class CombinedPipeline:
                 "enhanced_frames": enhanced_frame_count, "enhanced_percentage": round(100.0 * enhanced_frame_count / total, 2),
             }
 
+        dehaze_summary = None
+        if req.enable_dehaze:
+            total = video_info.frame_count or 1
+            dehaze_summary = {
+                "haze_detected": haze_frame_count > 0, "dehazing_applied": dehazed_frame_count > 0,
+                "haze_frames": haze_frame_count, "dehazed_frames": dehazed_frame_count,
+                "dehazed_percentage": round(100.0 * dehazed_frame_count / total, 2),
+            }
+
         return OrchestratorResult(
             output_video_path=Path(output_path), codec_used=writer.open_result.codec_used, browser_playable=writer.open_result.browser_playable,
             video_info=video_info, metrics=metrics, events=all_events, modules_run=modules_run,
-            person_id=person_id_summary, anpr=anpr_summary, zones=zones_summary, behavior=behavior_summary, lowlight=lowlight_summary,
-            evidence_dir=evidence_dir,
+            person_id=person_id_summary, anpr=anpr_summary, zones=zones_summary, behavior=behavior_summary,
+            lowlight=lowlight_summary, dehaze=dehaze_summary, evidence_dir=evidence_dir,
         )

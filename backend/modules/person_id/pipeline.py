@@ -183,7 +183,6 @@ class PersonIDPipeline:
                 detection_stride=self.tracker_config.detection_stride,
                 confidence=self.tracker_config.confidence,
                 track_buffer=cfg.gap_tolerance_frames,
-                frame_rate=max(1, round(reader.info.fps)) if reader.info.fps else 30,
                 device=self.tracker_config.device,
             )
 

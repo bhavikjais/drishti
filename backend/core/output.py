@@ -165,6 +165,35 @@ def draw_polygon(image: np.ndarray, points, color=YELLOW, thickness: int = 2, la
         cv2.putText(image, label, (int(x) + 3, int(top) + box_h - 6), font, scale, (0, 0, 0), weight, cv2.LINE_AA)
 
 
+def draw_predicted_path(
+    image: np.ndarray,
+    origin: tuple[float, float],
+    target: tuple[float, float],
+    color: tuple[int, int, int] = YELLOW,
+    thickness: int = 2,
+    dash_len: int = 10,
+) -> None:
+    """Dashed line + end marker from a track's current point to its
+    extrapolated future position - visualizes a zone/forecast.py intent
+    prediction (PREDICTED_ZONE_CROSSING) before the track actually gets
+    there, so the operator sees WHY the alert fired, not just that it did.
+    """
+    ox, oy = origin
+    tx, ty = target
+    dist = ((tx - ox) ** 2 + (oy - ty) ** 2) ** 0.5
+    if dist < 1e-3:
+        return
+    steps = max(1, int(dist // dash_len))
+    for i in range(steps):
+        if i % 2 == 1:
+            continue  # skip alternate segments for the dashed look
+        t0, t1 = i / steps, min(1.0, (i + 1) / steps)
+        p0 = (int(ox + (tx - ox) * t0), int(oy + (ty - oy) * t0))
+        p1 = (int(ox + (tx - ox) * t1), int(oy + (ty - oy) * t1))
+        cv2.line(image, p0, p1, color, thickness)
+    cv2.circle(image, (int(tx), int(ty)), 6, color, thickness)
+
+
 def draw_banner(image: np.ndarray, lines: list[str], color: tuple[int, int, int], slot: int = 0) -> None:
     """Draws a stacked event banner (e.g. ["ZONE ENTRY", "PERSON #12",
     "00:14.2"]) anchored top-left. `slot` offsets multiple simultaneous

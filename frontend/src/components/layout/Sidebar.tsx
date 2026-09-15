@@ -1,5 +1,5 @@
 import {
-  Activity, Car, Eye, LayoutDashboard, ListChecks, Moon, Scan, Search,
+  Activity, Bell, Car, CloudFog, Eye, LayoutDashboard, ListChecks, Moon, Scan, Search,
   Server, Settings, ShieldAlert, Users,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -8,6 +8,7 @@ const primaryLinks = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/analysis", label: "Analysis", icon: Scan },
   { to: "/jobs", label: "Jobs", icon: ListChecks },
+  { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/events", label: "Events", icon: Activity },
   { to: "/anpr-search", label: "ANPR Search", icon: Search },
 ];
@@ -27,6 +28,7 @@ const moduleLinks = [
   { to: "/analysis?open=zone", label: "Zone Intrusion", icon: ShieldAlert },
   { to: "/analysis?open=behavior", label: "Behavioral Analytics", icon: Activity },
   { to: "/analysis?open=lowlight", label: "Low-Light Enhancement", icon: Moon },
+  { to: "/analysis?open=dehaze", label: "Haze / Fog Removal", icon: CloudFog },
 ];
 
 const systemLinks = [
@@ -64,7 +66,7 @@ export function Sidebar() {
       <div className="mb-4 border-b border-border-1 px-5 pb-5">
         <div className="flex items-center gap-2 text-lg font-bold tracking-wide text-text-primary">
           <span className="h-2 w-2 shrink-0 rounded-full bg-accent-blue shadow-[0_0_8px_var(--color-accent-blue)]" />
-          BORDERWATCH
+          DRISHTI
         </div>
         <div className="mt-1 pl-4 text-[11px] tracking-[1.5px] text-text-tertiary">AI VIDEO INTELLIGENCE</div>
       </div>

@@ -1,4 +1,4 @@
-import { AlertTriangle, Eye, Info, Moon, Search, ShieldAlert, Sparkles } from "lucide-react";
+import { AlertTriangle, Bell, CloudFog, Eye, Info, Moon, Search, ShieldAlert, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
@@ -19,6 +19,7 @@ interface ModuleFlags {
   zone: boolean;
   behavior: boolean;
   lowlight: boolean;
+  dehaze: boolean;
 }
 
 const OPEN_PARAM_MAP: Record<string, keyof ModuleFlags | null> = {
@@ -27,6 +28,7 @@ const OPEN_PARAM_MAP: Record<string, keyof ModuleFlags | null> = {
   zone: "zone",
   behavior: "behavior",
   lowlight: "lowlight",
+  dehaze: "dehaze",
   human_detection: null,
   vehicle_detection: null,
 };
@@ -38,7 +40,7 @@ export function Analysis() {
   const [step, setStep] = useState(1);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [video, setVideo] = useState<VideoUpload | null>(null);
-  const [modules, setModules] = useState<ModuleFlags>({ person_id: false, anpr: false, zone: false, behavior: false, lowlight: false });
+  const [modules, setModules] = useState<ModuleFlags>({ person_id: false, anpr: false, zone: false, behavior: false, lowlight: false, dehaze: false });
   const [deepLinkNote, setDeepLinkNote] = useState<string | null>(null);
 
   const [referenceSetId, setReferenceSetId] = useState<string | null>(null);
@@ -46,6 +48,7 @@ export function Analysis() {
   const [targetPlate, setTargetPlate] = useState("");
   const [zones, setZones] = useState<Zone[]>([]);
   const [behaviorConfig, setBehaviorConfig] = useState<BehaviorConfigValues>(DEFAULT_BEHAVIOR_CONFIG);
+  const [webhookUrl, setWebhookUrl] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -111,6 +114,8 @@ export function Analysis() {
         };
       }
       if (modules.lowlight) req.lowlight = {};
+      if (modules.dehaze) req.dehaze = {};
+      if (webhookUrl.trim()) req.alert = { webhook_url: webhookUrl.trim() };
 
       const job = await startCombinedJob(req);
       navigate(`/processing/${job.job_id}`);
@@ -122,7 +127,7 @@ export function Analysis() {
 
   return (
     <>
-      <PageHeader title="New Analysis" subtitle="Configure and launch a BorderWatch video analysis" />
+      <PageHeader title="New Analysis" subtitle="Configure and launch a Drishti video analysis" />
       <PageBody narrow>
         <StepIndicator current={step} />
 
@@ -168,6 +173,7 @@ export function Analysis() {
               <ModuleCard icon={ShieldAlert} title="Zone Intrusion" description="Detect entry, exit and dwell inside restricted areas." selected={modules.zone} onToggle={() => toggleModule("zone")} />
               <ModuleCard icon={Sparkles} title="Behavioral Analytics" description="Detect loitering, abnormal movement and direction changes." selected={modules.behavior} onToggle={() => toggleModule("behavior")} />
               <ModuleCard icon={Moon} title="Low-Light Enhancement" description="Automatically improve genuinely underexposed footage." selected={modules.lowlight} onToggle={() => toggleModule("lowlight")} />
+              <ModuleCard icon={CloudFog} title="Haze / Fog Removal" description="Automatically detect and clear mist, fog or haze obscuring the camera." selected={modules.dehaze} onToggle={() => toggleModule("dehaze")} />
             </div>
           </Panel>
         )}
@@ -201,7 +207,7 @@ export function Analysis() {
                   maxLength={20}
                 />
                 <p className="mt-2 text-[11.5px] text-text-tertiary">
-                  BorderWatch will search confirmed plate observations in the uploaded video. Leave blank to run general ANPR without searching for a specific plate.
+                  Drishti will search confirmed plate observations in the uploaded video. Leave blank to run general ANPR without searching for a specific plate.
                 </p>
               </Panel>
             )}
@@ -234,6 +240,35 @@ export function Analysis() {
                 </div>
               </Panel>
             )}
+
+            {modules.dehaze && (
+              <Panel title="Haze / Fog Removal">
+                <div className="flex items-center justify-between rounded-md border border-border-1 bg-bg-3 px-4 py-3">
+                  <div>
+                    <div className="text-[12.5px] font-semibold text-text-primary">Auto Dehazing</div>
+                    <p className="mt-1 text-[11.5px] text-text-tertiary">Automatically clear only footage that is genuinely hazy or misty (Dark Channel Prior).</p>
+                  </div>
+                  <span className="rounded-full border border-accent-green/35 bg-accent-green/12 px-2.5 py-1 text-[10.5px] font-semibold text-accent-green">DEFAULT ON</span>
+                </div>
+                <p className="mt-3 text-[11.5px] text-text-tertiary">
+                  Works well on light-to-moderate haze/mist and can improve detection recall in those conditions. In dense fog, visible-light dehazing has a physical ceiling — it restores contrast, not detail that was never captured by the sensor.
+                </p>
+              </Panel>
+            )}
+
+            <Panel title="Alerts (optional)">
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Webhook URL</label>
+              <input
+                className="w-full rounded border border-border-2 bg-bg-3 px-3 py-2.5 font-mono text-[12.5px] text-text-primary placeholder:text-text-disabled focus:border-accent-blue focus:outline-none"
+                placeholder="https://hooks.slack.com/services/…"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+              />
+              <p className="mt-2 flex items-start gap-2 text-[11.5px] text-text-tertiary">
+                <Bell size={13} className="mt-0.5 shrink-0" />
+                Sends a JSON POST here when a target is confirmed/reacquired, a predicted zone intrusion fires, or similar target-related alerts occur — works directly with Slack, Discord and Teams incoming webhooks. Leave blank to disable.
+              </p>
+            </Panel>
           </div>
         )}
 
@@ -250,6 +285,8 @@ export function Analysis() {
               {modules.zone && <ReviewChip label={`Zone Intrusion (${zones.length} zone${zones.length === 1 ? "" : "s"})`} />}
               {modules.behavior && <ReviewChip label="Behavioral Analytics" />}
               {modules.lowlight && <ReviewChip label="Low-Light Enhancement" />}
+              {modules.dehaze && <ReviewChip label="Haze / Fog Removal" />}
+              {webhookUrl.trim() && <ReviewChip label="Webhook Alerts" />}
               {selectedCount === 0 && <span className="text-[12.5px] text-text-tertiary">No modules selected</span>}
             </div>
 

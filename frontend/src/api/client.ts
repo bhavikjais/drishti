@@ -30,7 +30,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(path, init);
   } catch {
-    throw new ApiError(0, "Cannot reach the BorderWatch backend. Is the API running?");
+    throw new ApiError(0, "Cannot reach the Drishti backend. Is the API running?");
   }
   if (!res.ok) {
     throw new ApiError(res.status, await parseErrorDetail(res));

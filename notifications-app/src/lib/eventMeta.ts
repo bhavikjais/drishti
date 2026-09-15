@@ -3,6 +3,10 @@ import {
   ShieldAlert, Sparkles, TriangleAlert, type LucideIcon,
 } from "lucide-react";
 
+// Mirrors frontend/src/lib/eventMeta.ts - kept as a plain copy rather than a
+// shared package since this is a deliberately standalone app (own
+// build/deploy, no monorepo workspace wiring). Keep the two in sync by hand
+// if a new event type is added on the backend.
 export type Severity = "red" | "amber" | "green" | "blue" | "neutral";
 
 export interface EventMeta {
@@ -11,10 +15,6 @@ export interface EventMeta {
   icon: LucideIcon;
 }
 
-// Every event type the backend actually emits (core/events.py, zone/state.py,
-// behavior/state.py, anpr/pipeline.py, orchestrator.py's TARGET_ZONE_INTRUSION
-// / LOW_LIGHT). Unknown types fall back to a neutral generic entry rather
-// than crashing the UI.
 const REGISTRY: Record<string, EventMeta> = {
   TARGET_CONFIRMED: { label: "Target Confirmed", severity: "red", icon: Crosshair },
   TARGET_REACQUIRED: { label: "Target Reacquired", severity: "red", icon: Crosshair },
@@ -47,10 +47,6 @@ export function eventMeta(type: string): EventMeta {
   return REGISTRY[type] ?? { ...FALLBACK, label: type };
 }
 
-// Which module produced an event type - drives the Notifications panel's
-// feature filter. Deliberately separate from severity/icon above: a
-// TARGET_ZONE_INTRUSION_PREDICTED is "red" severity but still a zone-module
-// event as far as "which module do I want to see alerts from" is concerned.
 export type Feature = "person_id" | "zone" | "anpr" | "behavior" | "lowlight" | "dehaze" | "other";
 
 export const FEATURE_LABELS: Record<Feature, string> = {
@@ -79,10 +75,6 @@ export function eventFeature(type: string): Feature {
   return FEATURE_BY_TYPE[type] ?? "other";
 }
 
-// "Notification-worthy" = not a routine/resolved event. ZONE_EXIT is the
-// only green (routine) type currently registered; this stays a severity
-// check rather than a type list so newly-registered green events fall out
-// of the Notifications panel automatically.
 export function isNotifiable(type: string): boolean {
   return eventMeta(type).severity !== "green";
 }

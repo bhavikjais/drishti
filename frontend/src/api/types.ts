@@ -93,6 +93,7 @@ export interface ZoneSummary {
   entries: number;
   exits: number;
   dwell_events: number;
+  predicted_crossings: number;
 }
 
 export interface BehaviorSummary {
@@ -109,6 +110,14 @@ export interface LowlightSummary {
   enhanced_percentage: number;
 }
 
+export interface DehazeSummary {
+  haze_detected: boolean;
+  dehazing_applied: boolean;
+  haze_frames: number;
+  dehazed_frames: number;
+  dehazed_percentage: number;
+}
+
 export interface JobSummary {
   // combined-job fields
   modules_run?: string[];
@@ -120,6 +129,7 @@ export interface JobSummary {
   zones?: ZoneSummary[] | null;
   behavior?: BehaviorSummary | null;
   lowlight?: LowlightSummary | null;
+  dehaze?: DehazeSummary | null;
   // legacy zone-only job fields (POST /api/zone-jobs)
   zone_id?: string;
   tracks_observed?: number;
@@ -177,6 +187,14 @@ export interface LowlightModuleRequest {
   config?: Record<string, number | string | boolean> | null;
 }
 
+export interface DehazeModuleRequest {
+  config?: Record<string, number | boolean> | null;
+}
+
+export interface AlertModuleRequest {
+  webhook_url: string;
+}
+
 export interface CombinedJobRequest {
   video_id: string;
   person_id?: PersonIdModuleRequest | null;
@@ -184,6 +202,8 @@ export interface CombinedJobRequest {
   zone_ids?: string[];
   behavior?: BehaviorModuleRequest | null;
   lowlight?: LowlightModuleRequest | null;
+  dehaze?: DehazeModuleRequest | null;
+  alert?: AlertModuleRequest | null;
 }
 
 export interface PlateSearchRequest {

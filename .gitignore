@@ -7,6 +7,8 @@ __pycache__/
 # Node
 frontend/node_modules/
 frontend/dist/
+notifications-app/node_modules/
+notifications-app/dist/
 
 # Runtime / generated data (job outputs, uploads, per-job artifacts)
 jobs/
@@ -27,3 +29,7 @@ Thumbs.db
 # Env
 .env
 .env.local
+
+# Scratch / debug output
+scratch_hazy.mp4
+kernel.errors.txt

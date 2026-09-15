@@ -5,6 +5,12 @@ the zone outline plus ENTRY/EXIT/LONG_DWELL banners.
 Zone membership testing runs directly off the shared tracker's per-frame
 boxes - no extra AI model, no sampling stride needed, since ray-casting a
 point against an n-gon is negligible next to detection/tracking cost.
+
+Also runs zone/forecast.py's intent forecasting alongside the reactive
+ZoneMonitor: while ZoneMonitor reports a crossing once it has already
+happened, ZoneForecaster extrapolates each track's trajectory forward and
+reports PREDICTED_ZONE_CROSSING *before* the track gets there, when its
+projected path would cross the boundary within predict_horizon_sec.
 """
 from __future__ import annotations
 
@@ -14,15 +20,19 @@ from typing import Callable
 
 from backend.config import TrackerConfig, ZoneConfig
 from backend.core.output import (
-    GREEN, ORANGE, OutputVideoWriter, draw_banner, draw_polygon,
-    draw_target_box, format_timestamp,
+    GREEN, ORANGE, YELLOW, OutputVideoWriter, draw_banner, draw_polygon,
+    draw_predicted_path, draw_target_box, format_timestamp,
 )
 from backend.core.tracker import ObjectTracker
 from backend.core.video import VideoInfo, VideoReader
+from backend.modules.zone.forecast import ZoneForecaster
 from backend.modules.zone.geometry import Zone, centroid, denormalize_polygon, footpoint
 from backend.modules.zone.state import INSIDE, ZoneMonitor
 
-_BANNER_COLOR = {"ZONE_ENTRY": ORANGE, "ZONE_EXIT": GREEN, "LONG_DWELL": (0, 0, 200)}
+_BANNER_COLOR = {
+    "ZONE_ENTRY": ORANGE, "ZONE_EXIT": GREEN, "LONG_DWELL": (0, 0, 200),
+    "PREDICTED_ZONE_CROSSING": YELLOW,
+}
 
 
 @dataclass
@@ -82,6 +92,13 @@ class ZonePipeline:
             track_absence_grace_frames=cfg.track_absence_grace_frames,
             dwell_threshold_sec=cfg.dwell_threshold_sec,
         )
+        forecaster = ZoneForecaster(
+            zone.zone_id,
+            horizon_sec=cfg.predict_horizon_sec,
+            history_frames=cfg.predict_history_frames,
+            min_speed_px_per_sec=cfg.predict_min_speed_px_per_sec,
+            rewarn_cooldown_sec=cfg.predict_rewarn_cooldown_sec,
+        ) if cfg.predict_enabled else None
 
         norm_polygon = zone.normalized_polygon()
         track_class: dict[int, int] = {}
@@ -104,6 +121,13 @@ class ZonePipeline:
                 monitor.update(points, frame.index, frame.timestamp_sec, polygon_px)
                 new_events = monitor.events[n_before:]
 
+                new_forecasts = []
+                if forecaster is not None:
+                    currently_inside = {tid for tid in points if monitor.state_of(tid) == INSIDE}
+                    n_before_fc = len(forecaster.events)
+                    forecaster.update(points, currently_inside, frame.index, frame.timestamp_sec, polygon_px)
+                    new_forecasts = forecaster.events[n_before_fc:]
+
                 draw_polygon(frame.image, polygon_px, label=zone.label or "RESTRICTED ZONE")
 
                 for tid, t in tracks_by_id.items():
@@ -121,6 +145,13 @@ class ZonePipeline:
                         lines = ["LONG DWELL", f"{cname} #{ev.track_id}", f"Duration: {ev.data['duration_sec']:.1f} sec"]
                     active_banners.append((lines, _BANNER_COLOR[ev.type], frame.index + banner_frames))
 
+                for ev in new_forecasts:
+                    cname = self._class_name(track_class.get(ev.track_id, -1))
+                    lines = ["CROSSING PREDICTED", f"{cname} #{ev.track_id}", f"ETA {ev.data['eta_sec']:.1f}s"]
+                    active_banners.append((lines, _BANNER_COLOR["PREDICTED_ZONE_CROSSING"], frame.index + banner_frames))
+                    if ev.track_id in points:
+                        draw_predicted_path(frame.image, points[ev.track_id], tuple(ev.data["predicted_point"]))
+
                 active_banners = [b for b in active_banners if b[2] > frame.index]
                 for slot, (lines, color, _expire) in enumerate(active_banners):
                     draw_banner(frame.image, lines, color, slot=slot)
@@ -137,7 +168,11 @@ class ZonePipeline:
         if progress_cb is not None:
             progress_cb(1.0)
 
-        events_dicts = [e.__dict__ for e in monitor.events]
+        forecast_events = forecaster.events if forecaster is not None else []
+        events_dicts = sorted(
+            [e.__dict__ for e in monitor.events] + [e.__dict__ for e in forecast_events],
+            key=lambda d: d["frame_index"],
+        )
         entries = sum(1 for e in monitor.events if e.type == "ZONE_ENTRY")
         exits = sum(1 for e in monitor.events if e.type == "ZONE_EXIT")
         dwells = sum(1 for e in monitor.events if e.type == "LONG_DWELL")

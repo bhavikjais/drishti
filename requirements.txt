@@ -1,6 +1,6 @@
 # CPU-only PyTorch build. If a CUDA GPU is available on the target machine,
 # swap this index url / package version for a matching cu12x wheel and set
-# BORDERWATCH_DEVICE=cuda (see backend/config.py for auto-detection).
+# DRISHTI_DEVICE=cuda (see backend/config.py for auto-detection).
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.3.1+cpu
 torchvision==0.18.1+cpu

@@ -88,6 +88,14 @@ class LowlightModuleRequest(BaseModel):
     config: dict | None = None
 
 
+class DehazeModuleRequest(BaseModel):
+    config: dict | None = None
+
+
+class AlertModuleRequest(BaseModel):
+    webhook_url: str
+
+
 class CombinedJobRequest(BaseModel):
     video_id: str
     person_id: PersonIdModuleRequest | None = None
@@ -95,6 +103,8 @@ class CombinedJobRequest(BaseModel):
     zone_ids: list[str] = []
     behavior: BehaviorModuleRequest | None = None
     lowlight: LowlightModuleRequest | None = None
+    dehaze: DehazeModuleRequest | None = None
+    alert: AlertModuleRequest | None = None
 
 
 class PlateSearchRequest(BaseModel):

@@ -1,8 +1,7 @@
 @import "tailwindcss";
 
-/* Drishti design tokens - dark, tactical, restrained.
-   Color is semantic: red=threat/target, amber=warning, green=healthy,
-   blue=information/active, white=primary text. No neon, no decorative gradients. */
+/* Same design tokens as frontend/src/index.css - a separate app, but should
+   look like the same product family when someone has both open. */
 @theme {
   --font-sans: -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "SF Mono", "Cascadia Code", Consolas, "Roboto Mono", monospace;
@@ -22,16 +21,14 @@
   --color-text-disabled: #4a5563;
 
   --color-accent-blue: #3b9eff;
-  --color-accent-cyan: #34d6d6;
   --color-accent-red: #ef4444;
   --color-accent-amber: #f5a623;
   --color-accent-green: #2ecc71;
-  --color-accent-magenta: #c04dcc;
-  --color-accent-orange: #ff8c1a;
 }
 
 html, body, #root { height: 100%; }
 body {
+  margin: 0;
   background: var(--color-bg-1);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
@@ -41,22 +38,3 @@ body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-border-2); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); background-clip: padding-box; }
-
-.tabular-nums { font-variant-numeric: tabular-nums; }
-
-@keyframes bw-shimmer {
-  0% { background-position: -200px 0; }
-  100% { background-position: calc(200px + 100%) 0; }
-}
-.skeleton {
-  background: linear-gradient(90deg, var(--color-bg-3) 25%, var(--color-bg-4) 37%, var(--color-bg-3) 63%);
-  background-size: 400px 100%;
-  animation: bw-shimmer 1.4s ease-in-out infinite;
-}
-
-@keyframes bw-indeterminate {
-  0% { margin-left: -30%; }
-  100% { margin-left: 100%; }
-}
-.progress-indeterminate { width: 30%; animation: bw-indeterminate 1.3s ease-in-out infinite; }

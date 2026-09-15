@@ -21,7 +21,7 @@ export function Settings() {
         <div className="mb-4 flex items-start gap-2 rounded-md border border-accent-blue/30 bg-accent-blue/10 px-4 py-3 text-[12px] text-text-secondary">
           <Info size={16} className="mt-0.5 shrink-0 text-accent-blue" />
           <div>
-            These are the BorderWatch system defaults. Module-specific thresholds (loitering sensitivity, low-light
+            These are the Drishti system defaults. Module-specific thresholds (loitering sensitivity, low-light
             auto-enhancement, etc.) are configured per-analysis on the{" "}
             <button onClick={() => navigate("/analysis")} className="font-semibold text-accent-blue underline underline-offset-2">
               Analysis page

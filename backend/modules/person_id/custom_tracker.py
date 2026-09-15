@@ -42,7 +42,14 @@ class _EmptyBoxes:
 
     conf = np.zeros((0,), dtype=np.float32)
     xywh = np.zeros((0, 4), dtype=np.float32)
+    xyxy = np.zeros((0, 4), dtype=np.float32)
     cls = np.zeros((0,), dtype=np.float32)
+
+    def __getitem__(self, _mask) -> "_EmptyBoxes":
+        return self  # always empty, regardless of the boolean mask BOTSORT indexes with
+
+    def __len__(self) -> int:
+        return 0
 
 
 def _xywh_to_xyxy_int(row: np.ndarray, width: int, height: int) -> tuple[int, int, int, int]:
@@ -68,7 +75,6 @@ class PersonBotSortTracker:
         # ~0.062, different-person ~0.265-0.31 -- the 0.8 threshold (which
         # requires distance/2 <= 1-0.8 = 0.2) cleanly separates the two.
         appearance_thresh: float = 0.8,
-        frame_rate: int = 30,
         device: str | None = None,
     ) -> None:
         self._model = YOLO(model_path)
@@ -85,7 +91,7 @@ class PersonBotSortTracker:
             proximity_thresh=0.5, appearance_thresh=appearance_thresh,
             with_reid=True, model="auto",  # "auto"/model unused -- .encoder is replaced below
         )
-        self._tracker = BOTSORT(args, frame_rate=frame_rate)
+        self._tracker = BOTSORT(args)
         self._tracker.encoder = self._make_encoder(reid)
 
     def _make_encoder(self, reid: PersonReID):

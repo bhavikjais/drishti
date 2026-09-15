@@ -217,6 +217,17 @@ class ZoneConfig:
     # How long an ENTRY/EXIT/LONG_DWELL banner stays on screen, in seconds.
     banner_display_sec: float = 2.0
 
+    # --- intent forecasting (zone/forecast.py) ---
+    # Predicts a crossing before it happens by extrapolating each track's
+    # recent trajectory forward against the zone boundary. Pixel-space and
+    # resolution-dependent like BehaviorConfig's thresholds above - tuned
+    # for the ~960px-wide clips used in this project's smoke tests.
+    predict_enabled: bool = True
+    predict_horizon_sec: float = 5.0  # only alert if projected crossing is within this many seconds
+    predict_history_frames: int = 8  # trailing footpoints used to fit velocity
+    predict_min_speed_px_per_sec: float = 15.0  # below this, treat as ~stationary and skip (avoids jitter-driven false predictions)
+    predict_rewarn_cooldown_sec: float = 8.0  # minimum gap between repeated warnings for the same still-approaching track
+
 
 @dataclass
 class BehaviorConfig:
@@ -293,6 +304,68 @@ class LowLightConfig:
 
 
 @dataclass
+class DehazeConfig:
+    """Automatic haze/mist detection + dehazing (Dark Channel Prior).
+
+    Detection runs on a downsampled copy of every frame (cheap: a resize
+    plus a per-pixel channel-min and a local min-filter) and only frames
+    classified HAZY ever reach the dehaze path - clear footage is never
+    touched. No learned model - Dark Channel Prior is a classical technique
+    that needs no training data and runs entirely on CPU (see
+    core/dehaze.py's docstring for why, mirroring lowlight.py's zero_dce
+    note).
+    """
+    enabled: bool = True
+
+    # Dark channel patch size (pixels, on the downsampled analysis frame) -
+    # the local min-filter window. Larger = smoother but coarser haze
+    # estimate.
+    dark_channel_patch: int = 15
+    # A frame is HAZY if its mean dark channel value (0-1 scale) is at or
+    # above this - haze-free outdoor scenes are normally well below it.
+    haze_dark_channel_threshold: float = 0.25
+    # Brightness/haze analysis is done on a frame resized so its longer side
+    # is at most this many pixels - negligible cost regardless of source
+    # resolution.
+    sample_max_dim: int = 320
+
+    # Fraction of brightest-dark-channel pixels considered when estimating
+    # atmospheric light (standard Dark Channel Prior heuristic).
+    atmospheric_light_top_frac: float = 0.001
+    # How much haze to remove (0-1); 1.0 removes it fully but can look
+    # unnaturally stark, so the standard DCP choice keeps a little in.
+    omega: float = 0.95
+    # Transmission floor - prevents divide-by-near-zero from turning dense-
+    # haze regions into noisy blown-out output.
+    min_transmission: float = 0.1
+    # Edge-preserving refinement of the raw per-patch transmission map, to
+    # avoid hard block artifacts around object boundaries.
+    guided_filter_radius: int = 40
+    guided_filter_eps: float = 1e-3
+
+
+@dataclass
+class AlertConfig:
+    """Best-effort webhook notification when a qualifying event fires
+    (target confirmed/reacquired, predicted zone intrusion, etc.) - lets an
+    operator wire Drishti into a Slack/Discord/Teams incoming webhook or
+    their own endpoint, instead of having to watch the browser tab.
+
+    Dispatched from a background thread (see core/alerts.py), once the job
+    completes and the final event list is known - never inline in the video
+    processing loop, so a slow or unreachable endpoint can never stall frame
+    processing. Failures are logged and swallowed, never raised: alerting is
+    a best-effort side channel, not a correctness-critical part of the job.
+    """
+    enabled: bool = False
+    webhook_url: str | None = None
+    # None = core/alerts.py's DEFAULT_ALERT_EVENT_TYPES (target-related
+    # events only, not routine ZONE_ENTRY/PLATE_DETECTED noise).
+    event_types: frozenset[str] | None = None
+    timeout_sec: float = 5.0
+
+
+@dataclass
 class AppConfig:
     video: VideoEngineConfig = field(default_factory=VideoEngineConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
@@ -301,6 +374,8 @@ class AppConfig:
     zone: ZoneConfig = field(default_factory=ZoneConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
     lowlight: LowLightConfig = field(default_factory=LowLightConfig)
+    dehaze: DehazeConfig = field(default_factory=DehazeConfig)
+    alert: AlertConfig = field(default_factory=AlertConfig)
 
 
 def get_config() -> AppConfig:
