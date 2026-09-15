@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import os
 from pathlib import Path
 
 import cv2
@@ -48,15 +49,20 @@ from backend.orchestrator import CombinedPipeline, OrchestratorError, Orchestrat
 logger = logging.getLogger("backend.app")
 app = FastAPI(title="Drishti API")
 
-# The main frontend (frontend/) talks to this API through Vite's dev proxy,
-# so it never needed CORS. notifications-app/ is a genuinely separate app on
-# its own origin/port with no such proxy, so it hits this API directly -
-# local dev origins only, not a wildcard, since this is a security tool.
+# In local dev the main frontend (frontend/) talks to this API through
+# Vite's dev proxy, so it never needed CORS; notifications-app/ is a
+# genuinely separate app on its own origin/port with no such proxy, so it
+# hits this API directly. In production (e.g. a Vercel-hosted frontend
+# calling this API on a different host) DRISHTI_CORS_ORIGINS adds exact
+# origins on top of the local dev ones - never a wildcard, since this is a
+# security tool.
+_extra_origins = [o.strip() for o in os.environ.get("DRISHTI_CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173", "http://127.0.0.1:5173",  # main dashboard (frontend/)
         "http://localhost:5175", "http://127.0.0.1:5175",  # notifications-app/ (5174 was taken by an unrelated process during dev)
+        *_extra_origins,
     ],
     allow_methods=["GET", "POST"],
     allow_headers=["*"],

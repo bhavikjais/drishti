@@ -17,8 +17,10 @@ uploads/
 references/
 zones/
 
-# Model weights (fetch separately, not source)
-models/
+# Model weights - the 4 cross-platform files (onnx/pt) are committed so
+# deploys (Render, etc.) have them without a separate download step; the
+# Windows-only OpenH264 DLL is not needed on Linux hosts.
+models/*.dll
 
 # Editor / OS
 .claude/

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: drishti-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /docs
+    envVars:
+      - key: DRISHTI_CORS_ORIGINS
+        sync: false
