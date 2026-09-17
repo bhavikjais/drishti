@@ -340,7 +340,16 @@ class CombinedPipeline:
                 person_tracker = PersonBotSortTracker(
                     model_path=str(self.tracker_config.model_path),
                     reid=self.person_reid,
-                    detection_stride=self.tracker_config.detection_stride,
+                    # Deliberately NOT self.tracker_config.detection_stride
+                    # (3): BOTSORT/ByteTrack removes any not-yet-activated
+                    # track that goes unmatched on a single update() call, and
+                    # a skipped (_EmptyBoxes) frame always offers zero
+                    # detections to match against - so with stride>1, a newly
+                    # -detected person's track gets destroyed on the very
+                    # next frame, before it can ever earn the second hit that
+                    # activates it. See the matching comment in
+                    # person_id/pipeline.py.
+                    detection_stride=1,
                     confidence=self.tracker_config.confidence,
                     track_buffer=self.person_id_cfg.gap_tolerance_frames,
                     device=self.tracker_config.device,

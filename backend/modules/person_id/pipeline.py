@@ -180,7 +180,18 @@ class PersonIDPipeline:
             tracker = PersonBotSortTracker(
                 model_path=str(self.tracker_config.model_path),
                 reid=self.reid,
-                detection_stride=self.tracker_config.detection_stride,
+                # Deliberately NOT self.tracker_config.detection_stride (3):
+                # BOTSORT/ByteTrack removes any not-yet-activated track that
+                # goes unmatched on a single update() call, and a skipped
+                # (_EmptyBoxes) frame always offers zero detections to match
+                # against - so with stride>1, a newly-detected person's track
+                # gets destroyed on the very next frame, before it can ever
+                # earn the second hit that activates it. Only a track born on
+                # the tracker's literal first frame is exempt (ByteTrack's
+                # frame_id==1 special case), which is why stride>1 here
+                # silently tracked almost nobody. Detecting every frame avoids
+                # this path entirely - see PersonBotSortTracker's docstring.
+                detection_stride=1,
                 confidence=self.tracker_config.confidence,
                 track_buffer=cfg.gap_tolerance_frames,
                 device=self.tracker_config.device,
